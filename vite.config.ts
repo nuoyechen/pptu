@@ -19,6 +19,18 @@ export default defineConfig(({mode}) => {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
+      proxy: {
+        '/api/baidu/token': {
+          target: 'https://aip.baidubce.com/oauth/2.0/token',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/api\/baidu\/token/, ''),
+        },
+        '/api/baidu/inpainting': {
+          target: 'https://aip.baidubce.com/rest/2.0/image-process/v1/inpainting',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/api\/baidu\/inpainting/, ''),
+        },
+      },
     },
   };
 });

@@ -326,8 +326,8 @@ export default function Editor({ productImage, logos, onBack }: EditorProps) {
       // 2. Call Baidu Cloud API if key exists
       if (apiKey && secretKey) {
         // Step 1: Get Access Token
-        // Note: For production, token should be fetched from backend to hide SK
-        const tokenRes = await fetch(`https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id=${apiKey}&client_secret=${secretKey}`, {
+        // Use local proxy to avoid CORS
+        const tokenRes = await fetch(`/api/baidu/token?grant_type=client_credentials&client_id=${apiKey}&client_secret=${secretKey}`, {
           method: 'POST'
         });
         
@@ -336,23 +336,7 @@ export default function Editor({ productImage, logos, onBack }: EditorProps) {
         const accessToken = tokenData.access_token;
 
         // Step 2: Call Image Inpainting API
-        const imageBase64 = canvas.toDataURL('image/png').split(',')[1];
-        // Baidu requires a mask image as well (rectangle_mask is optional if we provide mask image)
-        // Wait, Baidu's "Image Inpainting" usually takes a mask rectangle or a mask image.
-        // Let's use the standard "Image Inpainting" API which often takes a base64 image and a rectangle.
-        // But for irregular shapes, we need a mask.
-        // Baidu Cloud "Image Inpainting" (v2) supports mask.
-        
-        // Let's check Baidu's API docs. Usually it's `POST https://aip.baidubce.com/rest/2.0/image-process/v1/inpainting`
-        // It takes `image` (base64) and `rectangle` (json array) OR we can use the "Remove Object" API?
-        // Actually Baidu has "Image Inpainting" which removes watermarks/objects.
-        // Let's try the general "Image Inpainting" API.
-        
-        // Since we have a complex mask (irregular shape), passing a rectangle might not be precise.
-        // But Baidu's public API mostly documents rectangle-based inpainting.
-        // However, many users use `rectangle` to cover the area.
-        // Let's compute the bounding box of our drawing to pass as a rectangle.
-        
+        // ... (Mask calc code) ...
         let minX = width, minY = height, maxX = 0, maxY = 0;
         lines.forEach(line => {
           line.points.forEach((val: number, i: number) => {
@@ -381,7 +365,9 @@ export default function Editor({ productImage, logos, onBack }: EditorProps) {
           "height": maxY - minY
         };
 
-        const response = await fetch(`https://aip.baidubce.com/rest/2.0/image-process/v1/inpainting?access_token=${accessToken}`, {
+        const imageBase64 = canvas.toDataURL('image/png').split(',')[1];
+
+        const response = await fetch(`/api/baidu/inpainting?access_token=${accessToken}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded',

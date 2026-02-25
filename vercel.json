@@ -1,0 +1,16 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/baidu/token",
+      "destination": "https://aip.baidubce.com/oauth/2.0/token"
+    },
+    {
+      "source": "/api/baidu/inpainting",
+      "destination": "https://aip.baidubce.com/rest/2.0/image-process/v1/inpainting"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
