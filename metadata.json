@@ -1,0 +1,5 @@
+{
+  "name": "效果图生成器",
+  "description": "上传产品和Logo图片，轻松创建专业的产品效果图。支持自动去背和交互式摆放。",
+  "requestFramePermissions": []
+}
