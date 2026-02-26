@@ -47,16 +47,27 @@ const LogoItem = ({
 
   // Apply filters if needed
   useEffect(() => {
-    if (shapeRef.current) {
-      shapeRef.current.cache();
+    if (shapeRef.current && img) {
+      // Clear cache to remove old filters
+      shapeRef.current.clearCache();
+      
       if (logo.isInverted) {
+        // Cache with high pixel ratio for sharpness
+        // We use the image's intrinsic size or a multiple of display size
+        const ratio = Math.max(1, window.devicePixelRatio || 1) * 2;
+        shapeRef.current.cache({
+           pixelRatio: ratio
+        });
         shapeRef.current.filters([Konva.Filters.Invert]);
       } else {
         shapeRef.current.filters([]);
+        shapeRef.current.clearCache();
       }
+      
+      // Force redraw
       shapeRef.current.getLayer()?.batchDraw();
     }
-  }, [logo.isInverted, img]);
+  }, [logo.isInverted, img, logo.width, logo.height]);
 
   return (
     <React.Fragment>
@@ -83,8 +94,10 @@ const LogoItem = ({
           const scaleX = node.scaleX();
           const scaleY = node.scaleY();
 
+          // Reset scale to 1 and update width/height
           node.scaleX(1);
           node.scaleY(1);
+          
           onChange({
             ...logo,
             x: node.x(),
