@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
+import Konva from 'konva';
 import { Stage, Layer, Image as KonvaImage, Transformer, Line } from 'react-konva';
 import useImage from 'use-image';
-import { Download, Move, Maximize, RotateCcw, Trash2, ArrowLeft, Brush, Minus, Plus, RefreshCw, Check } from 'lucide-react';
+import { Download, Move, Maximize, RotateCcw, Trash2, ArrowLeft, Brush, Minus, Plus, RefreshCw, Check, SunMoon } from 'lucide-react';
 
 interface LogoData {
   id: string;
@@ -11,6 +12,7 @@ interface LogoData {
   width: number;
   height: number;
   rotation: number;
+  isInverted?: boolean;
 }
 
 interface EditorProps {
@@ -42,6 +44,19 @@ const LogoItem = ({
       trRef.current.getLayer().batchDraw();
     }
   }, [isSelected]);
+
+  // Apply filters if needed
+  useEffect(() => {
+    if (shapeRef.current) {
+      shapeRef.current.cache();
+      if (logo.isInverted) {
+        shapeRef.current.filters([Konva.Filters.Invert]);
+      } else {
+        shapeRef.current.filters([]);
+      }
+      shapeRef.current.getLayer()?.batchDraw();
+    }
+  }, [logo.isInverted, img]);
 
   return (
     <React.Fragment>
@@ -324,23 +339,20 @@ export default function Editor({ productImage, logos, onBack }: EditorProps) {
       });
 
       // 2. Call Baidu Cloud API if key exists
-      // Check local env first, but for Vercel deployment we assume keys are on server
-      // We will try to call our own API route.
-      
-      try {
-        // Step 1: Get Access Token via our Vercel API
-        const tokenRes = await fetch('/api/baidu?type=token', {
-          method: 'GET' // Changed to GET for simplicity, or keep POST if preferred
+      if (apiKey && secretKey) {
+        // Step 1: Get Access Token
+        // Use local proxy to avoid CORS
+        const tokenRes = await fetch(`/baidu-api/oauth/2.0/token?grant_type=client_credentials&client_id=${apiKey}&client_secret=${secretKey}`, {
+          method: 'POST'
         });
         
-        if (!tokenRes.ok) throw new Error("Failed to get Access Token");
+        if (!tokenRes.ok) throw new Error("Failed to get Baidu Access Token");
         const tokenData = await tokenRes.json();
-        
-        if (tokenData.error) throw new Error(tokenData.error);
         const accessToken = tokenData.access_token;
 
         // Step 2: Call Image Inpainting API
-        // ... (Mask calc code) ...
+        const imageBase64 = canvas.toDataURL('image/png').split(',')[1];
+        
         let minX = width, minY = height, maxX = 0, maxY = 0;
         lines.forEach(line => {
           line.points.forEach((val: number, i: number) => {
@@ -369,96 +381,86 @@ export default function Editor({ productImage, logos, onBack }: EditorProps) {
           "height": maxY - minY
         };
 
-        const imageBase64 = canvas.toDataURL('image/png').split(',')[1];
-
-        // Call our Vercel API to proxy the inpainting request
-        const response = await fetch(`/api/baidu?type=inpainting&access_token=${accessToken}`, {
+        const response = await fetch(`/baidu-api/rest/2.0/image-process/v1/inpainting?access_token=${accessToken}`, {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/x-www-form-urlencoded', // Vercel will receive this body
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Accept': 'application/json'
           },
           body: `image=${encodeURIComponent(imageBase64)}&rectangle=[${JSON.stringify(rect)}]`
         });
 
         if (!response.ok) {
-           const errData = await response.json();
-           throw new Error(`Baidu API Error: ${errData.error_msg || response.statusText}`);
+           throw new Error(`Baidu API Error: ${response.statusText}`);
         }
         
         const result = await response.json();
+        if (result.error_code) {
+          throw new Error(`Baidu API Error: ${result.error_msg}`);
+        }
+
         const newUrl = `data:image/jpeg;base64,${result.image}`;
         setCurrentProductImage(newUrl);
-        setLines([]);
-        setIsDrawing(false);
+      } else {
+        // 3. Fallback to Local Algorithm (Simple Blur)
+        console.warn("No API Key found. Using local fallback.");
+        alert("未检测到 API Key，正在使用本地简易算法。效果可能有限。\n请在 .env 文件中配置 VITE_BAIDU_AK 和 VITE_BAIDU_SK 以获得更好的修复效果。");
 
-      } catch (err: any) {
-         // Fallback logic if API fails
-         console.warn("API Error, falling back to local:", err);
-         
-         if (err.message && err.message.includes("Missing Baidu Cloud API Keys")) {
-             alert("Vercel 环境变量未配置！请在 Vercel 后台添加 VITE_BAIDU_AK 和 VITE_BAIDU_SK。");
-             // Stop processing if keys are missing but expected
-             setIsProcessing(false);
-             return; 
-         }
-         
-         console.log("Falling back to local algorithm...");
-         
-         // 3. Fallback to Local Algorithm (Simple Blur)
-         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-         const maskData = maskCtx.getImageData(0, 0, canvas.width, canvas.height);
-         const data = imageData.data;
-         const mData = maskData.data;
-         const width = canvas.width;
-         const height = canvas.height;
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const maskData = maskCtx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        const mData = maskData.data;
+        const width = canvas.width;
+        const height = canvas.height;
 
-         // Use Red channel of mask (White=255)
-         const isHole = new Uint8Array(width * height);
-         for (let i = 0; i < mData.length; i += 4) {
-           if (mData[i] > 100) isHole[i / 4] = 1;
-         }
+        // Use Red channel of mask (White=255)
+        const isHole = new Uint8Array(width * height);
+        for (let i = 0; i < mData.length; i += 4) {
+          if (mData[i] > 100) isHole[i / 4] = 1;
+        }
 
-         // Simple diffusion
-         const maxPasses = 20;
-         let changes = true;
-         for (let pass = 0; pass < maxPasses && changes; pass++) {
-           changes = false;
-           for (let y = 0; y < height; y++) {
-             for (let x = 0; x < width; x++) {
-               const idx = y * width + x;
-               if (isHole[idx]) {
-                 let r = 0, g = 0, b = 0, count = 0;
-                 for (let dy = -1; dy <= 1; dy++) {
-                   for (let dx = -1; dx <= 1; dx++) {
-                     if (dx === 0 && dy === 0) continue;
-                     const nx = x + dx;
-                     const ny = y + dy;
-                     if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-                       const nIdx = ny * width + nx;
-                       if (!isHole[nIdx]) {
-                         const pIdx = nIdx * 4;
-                         r += data[pIdx]; g += data[pIdx + 1]; b += data[pIdx + 2];
-                         count++;
-                       }
-                     }
-                   }
-                 }
-                 if (count > 0) {
-                   const pIdx = idx * 4;
-                   data[pIdx] = r / count; data[pIdx + 1] = g / count; data[pIdx + 2] = b / count;
-                   if (count >= 3 || pass > 10) isHole[idx] = 0;
-                   changes = true;
-                 }
-               }
-             }
-           }
-         }
-         ctx.putImageData(imageData, 0, 0);
-         const newUrl = canvas.toDataURL('image/jpeg', 0.9);
-         setCurrentProductImage(newUrl);
-         setLines([]);
-         setIsDrawing(false);
+        // Simple diffusion
+        const maxPasses = 20;
+        let changes = true;
+        for (let pass = 0; pass < maxPasses && changes; pass++) {
+          changes = false;
+          for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+              const idx = y * width + x;
+              if (isHole[idx]) {
+                let r = 0, g = 0, b = 0, count = 0;
+                for (let dy = -1; dy <= 1; dy++) {
+                  for (let dx = -1; dx <= 1; dx++) {
+                    if (dx === 0 && dy === 0) continue;
+                    const nx = x + dx;
+                    const ny = y + dy;
+                    if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                      const nIdx = ny * width + nx;
+                      if (!isHole[nIdx]) {
+                        const pIdx = nIdx * 4;
+                        r += data[pIdx]; g += data[pIdx + 1]; b += data[pIdx + 2];
+                        count++;
+                      }
+                    }
+                  }
+                }
+                if (count > 0) {
+                  const pIdx = idx * 4;
+                  data[pIdx] = r / count; data[pIdx + 1] = g / count; data[pIdx + 2] = b / count;
+                  if (count >= 3 || pass > 10) isHole[idx] = 0;
+                  changes = true;
+                }
+              }
+            }
+          }
+        }
+        ctx.putImageData(imageData, 0, 0);
+        const newUrl = canvas.toDataURL('image/jpeg', 0.9);
+        setCurrentProductImage(newUrl);
       }
+
+      setLines([]);
+      setIsDrawing(false);
     } catch (e) {
       console.error("Inpainting failed", e);
       alert("处理失败，请检查网络或 API Key 配置。");
@@ -498,6 +500,18 @@ export default function Editor({ productImage, logos, onBack }: EditorProps) {
         setIsExporting(false);
       }
     }, 100);
+  };
+
+  const handleInvert = () => {
+    if (selectedId) {
+      const newLogos = logoItems.slice();
+      const index = newLogos.findIndex(l => l.id === selectedId);
+      newLogos[index] = {
+        ...newLogos[index],
+        isInverted: !newLogos[index].isInverted
+      };
+      setLogoItems(newLogos);
+    }
   };
 
   const handleDelete = () => {
@@ -573,13 +587,22 @@ export default function Editor({ productImage, logos, onBack }: EditorProps) {
           </div>
 
           {selectedId && (
-            <button 
-              onClick={handleDelete}
-              className="flex items-center gap-2 px-4 py-2 text-red-600 hover:bg-red-50 rounded-full transition-colors text-sm font-bold"
-            >
-              <Trash2 size={16} />
-              删除 Logo
-            </button>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={handleInvert}
+                className="flex items-center gap-2 px-4 py-2 text-black/80 hover:bg-black/5 rounded-full transition-colors text-sm font-bold"
+              >
+                <SunMoon size={16} />
+                反相颜色
+              </button>
+              <button 
+                onClick={handleDelete}
+                className="flex items-center gap-2 px-4 py-2 text-red-600 hover:bg-red-50 rounded-full transition-colors text-sm font-bold"
+              >
+                <Trash2 size={16} />
+                删除 Logo
+              </button>
+            </div>
           )}
           <button 
             onClick={handleExport}

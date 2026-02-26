@@ -15,6 +15,41 @@ export default function App() {
   const [productImage, setProductImage] = useState<string | null>(null);
   const [logos, setLogos] = useState<string[]>([]);
 
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleProductDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const file = e.dataTransfer.files?.[0];
+    if (file && file.type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setProductImage(event.target?.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleLogoDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const files = e.dataTransfer.files;
+    if (files) {
+      Array.from(files).forEach(file => {
+        if (file.type.startsWith('image/')) {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            setLogos(prev => [...prev, event.target?.result as string]);
+          };
+          reader.readAsDataURL(file);
+        }
+      });
+    }
+  };
+
   const handleProductUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -83,19 +118,22 @@ export default function App() {
             </div>
             
             <div className="relative group">
-              <label className={`
+              <label 
+                onDragOver={handleDragOver}
+                onDrop={handleProductDrop}
+                className={`
                 relative flex flex-col items-center justify-center w-full aspect-[4/3] rounded-3xl border-2 border-dashed transition-all cursor-pointer overflow-hidden
                 ${productImage ? 'border-transparent bg-white shadow-xl' : 'border-[#141414]/10 hover:border-[#141414]/30 bg-white/50 hover:bg-white'}
               `}>
                 {productImage ? (
-                  <img src={productImage} alt="Product" className="w-full h-full object-contain p-4" />
+                  <img src={productImage} alt="Product" className="w-full h-full object-contain p-4 pointer-events-none" />
                 ) : (
-                  <div className="flex flex-col items-center gap-4">
+                  <div className="flex flex-col items-center gap-4 pointer-events-none">
                     <div className="w-16 h-16 rounded-full bg-[#141414]/5 flex items-center justify-center text-[#141414]/40 group-hover:scale-110 transition-transform">
                       <ImageIcon size={32} />
                     </div>
                     <div className="text-center">
-                      <p className="font-bold text-lg">点击上传产品图</p>
+                      <p className="font-bold text-lg">点击或拖拽上传产品图</p>
                       <p className="text-xs text-black/40 mt-1">支持 PNG, JPG 或 WEBP (最大 10MB)</p>
                     </div>
                   </div>
@@ -141,11 +179,15 @@ export default function App() {
                 ))}
               </AnimatePresence>
               
-              <label className="aspect-square rounded-2xl border-2 border-dashed border-[#141414]/10 hover:border-[#141414]/30 bg-white/50 hover:bg-white transition-all cursor-pointer flex flex-col items-center justify-center gap-2 group">
-                <div className="w-10 h-10 rounded-full bg-[#141414]/5 flex items-center justify-center text-[#141414]/40 group-hover:rotate-90 transition-transform">
+              <label 
+                onDragOver={handleDragOver}
+                onDrop={handleLogoDrop}
+                className="aspect-square rounded-2xl border-2 border-dashed border-[#141414]/10 hover:border-[#141414]/30 bg-white/50 hover:bg-white transition-all cursor-pointer flex flex-col items-center justify-center gap-2 group"
+              >
+                <div className="w-10 h-10 rounded-full bg-[#141414]/5 flex items-center justify-center text-[#141414]/40 group-hover:rotate-90 transition-transform pointer-events-none">
                   <Plus size={20} />
                 </div>
-                <span className="text-xs font-bold text-black/40">添加 Logo</span>
+                <span className="text-xs font-bold text-black/40 pointer-events-none">点击或拖拽 Logo</span>
                 <input type="file" className="hidden" accept="image/*" multiple onChange={handleLogoUpload} />
               </label>
             </div>
