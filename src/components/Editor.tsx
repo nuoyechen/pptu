@@ -3,6 +3,7 @@ import Konva from 'konva';
 import { Stage, Layer, Image as KonvaImage, Transformer, Line } from 'react-konva';
 import useImage from 'use-image';
 import { Download, Move, Maximize, RotateCcw, Trash2, ArrowLeft, Brush, Minus, Plus, RefreshCw, Check, SunMoon } from 'lucide-react';
+import { Analytics } from '@vercel/analytics/react';
 
 interface LogoData {
   id: string;
@@ -746,6 +747,7 @@ export default function Editor({ productImage, logos, onBack }: EditorProps) {
           </div>
         </div>
       </main>
+      <Analytics />
     </div>
   );
 }
