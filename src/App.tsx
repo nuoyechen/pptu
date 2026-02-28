@@ -6,6 +6,7 @@
 import React, { useState, useCallback } from 'react';
 import { Upload, Image as ImageIcon, Plus, Check, X, ArrowRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { Analytics } from '@vercel/analytics/react';
 import Editor from './components/Editor';
 
 type Step = 'upload' | 'edit';
@@ -216,6 +217,7 @@ export default function App() {
       <div className="fixed top-0 right-0 -z-10 opacity-10 pointer-events-none">
         <div className="text-[40vw] font-bold leading-none select-none">工作室</div>
       </div>
+      <Analytics />
     </div>
   );
 }
