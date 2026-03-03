@@ -2,7 +2,36 @@ import React, { useState, useRef, useEffect } from 'react';
 import Konva from 'konva';
 import { Stage, Layer, Image as KonvaImage, Transformer, Rect } from 'react-konva';
 import useImage from 'use-image';
-import { Download, Move, Maximize, ArrowLeft, MousePointer2, RefreshCw, Check, SunMoon, Trash2 } from 'lucide-react';
+import { Download, Move, Maximize, ArrowLeft, MousePointer2, RefreshCw, Check, SunMoon, Trash2, Palette } from 'lucide-react';
+
+// 纯色预设，用于将抠出的 Logo 改为指定颜色
+const PRESET_COLORS = [
+  { name: '黑', value: '#000000' },
+  { name: '白', value: '#ffffff' },
+  { name: '蓝', value: '#2563eb' },
+  { name: '红', value: '#dc2626' },
+  { name: '绿', value: '#16a34a' },
+  { name: '黄', value: '#eab308' },
+  { name: '紫', value: '#9333ea' },
+  { name: '橙', value: '#ea580c' },
+];
+
+// 自定义 Konva 滤镜：将 Logo 非透明区域改为纯色
+function createRecolorFilter(hexColor: string) {
+  const r = parseInt(hexColor.slice(1, 3), 16);
+  const g = parseInt(hexColor.slice(3, 5), 16);
+  const b = parseInt(hexColor.slice(5, 7), 16);
+  return function (imageData: ImageData) {
+    const data = imageData.data;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] > 30) {
+        data[i] = r;
+        data[i + 1] = g;
+        data[i + 2] = b;
+      }
+    }
+  };
+}
 
 interface LogoData {
   id: string;
@@ -13,6 +42,7 @@ interface LogoData {
   height: number;
   rotation: number;
   isInverted?: boolean;
+  logoColor?: string;
 }
 
 interface EditorProps {
@@ -45,29 +75,25 @@ const LogoItem = ({
     }
   }, [isSelected]);
 
-  // Apply filters if needed
+  // Apply filters: 纯色 / 反相 / 原样
   useEffect(() => {
     if (shapeRef.current && img) {
-      // Clear cache to remove old filters
       shapeRef.current.clearCache();
-      
-      if (logo.isInverted) {
-        // Cache with high pixel ratio for sharpness
-        // We use the image's intrinsic size or a multiple of display size
-        const ratio = Math.max(1, window.devicePixelRatio || 1) * 2;
-        shapeRef.current.cache({
-           pixelRatio: ratio
-        });
+      const ratio = Math.max(1, window.devicePixelRatio || 1) * 2;
+      shapeRef.current.cache({ pixelRatio: ratio });
+
+      if (logo.logoColor) {
+        shapeRef.current.filters([createRecolorFilter(logo.logoColor)]);
+      } else if (logo.isInverted) {
         shapeRef.current.filters([Konva.Filters.Invert]);
       } else {
         shapeRef.current.filters([]);
         shapeRef.current.clearCache();
       }
-      
-      // Force redraw
+
       shapeRef.current.getLayer()?.batchDraw();
     }
-  }, [logo.isInverted, img, logo.width, logo.height]);
+  }, [logo.logoColor, logo.isInverted, img, logo.width, logo.height]);
 
   return (
     <React.Fragment>
@@ -520,7 +546,21 @@ export default function Editor({ productImage, logos, onBack }: EditorProps) {
       const index = newLogos.findIndex(l => l.id === selectedId);
       newLogos[index] = {
         ...newLogos[index],
-        isInverted: !newLogos[index].isInverted
+        isInverted: !newLogos[index].isInverted,
+        logoColor: undefined, // 改色与反相互斥
+      };
+      setLogoItems(newLogos);
+    }
+  };
+
+  const handleLogoColor = (color: string | undefined) => {
+    if (selectedId) {
+      const newLogos = logoItems.slice();
+      const index = newLogos.findIndex(l => l.id === selectedId);
+      newLogos[index] = {
+        ...newLogos[index],
+        logoColor: color,
+        isInverted: color ? false : newLogos[index].isInverted, // 改色时取消反相
       };
       setLogoItems(newLogos);
     }
@@ -592,6 +632,44 @@ export default function Editor({ productImage, logos, onBack }: EditorProps) {
 
           {selectedId && (
             <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-white/50 rounded-full border border-black/5">
+                <Palette size={16} className="text-black/60" />
+                <span className="text-xs font-medium text-black/70">改色:</span>
+                {PRESET_COLORS.map(({ name, value }) => {
+                  const logo = logoItems.find(l => l.id === selectedId);
+                  const isActive = logo?.logoColor === value;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => handleLogoColor(isActive ? undefined : value)}
+                      className={`w-6 h-6 rounded-full border-2 transition-all ${
+                        isActive ? 'border-black scale-110 ring-2 ring-black/20' : 'border-transparent hover:scale-110'
+                      }`}
+                      style={{ backgroundColor: value }}
+                      title={name}
+                    />
+                  );
+                })}
+                <label
+                  className="relative w-6 h-6 rounded-full border-2 border-dashed border-black/30 hover:border-black/60 cursor-pointer overflow-hidden flex-shrink-0 block bg-gradient-to-br from-red-400 via-green-400 to-blue-500"
+                  title="自选任意颜色"
+                >
+                  <input
+                    type="color"
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    onChange={(e) => handleLogoColor(e.target.value)}
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => handleLogoColor(undefined)}
+                  className="text-xs text-black/50 hover:text-black/80 px-1"
+                  title="恢复原色"
+                >
+                  原色
+                </button>
+              </div>
               <button 
                 onClick={handleInvert}
                 className="flex items-center gap-2 px-4 py-2 text-black/80 hover:bg-black/5 rounded-full transition-colors text-sm font-bold"
@@ -741,6 +819,9 @@ export default function Editor({ productImage, logos, onBack }: EditorProps) {
             </div>
             <div className="flex items-center gap-2 text-xs font-mono text-black/40 bg-white/80 backdrop-blur-sm px-3 py-1.5 rounded-full border border-black/5">
               <Maximize size={12} /> 使用手柄缩放 Logo 大小
+            </div>
+            <div className="flex items-center gap-2 text-xs font-mono text-black/40 bg-white/80 backdrop-blur-sm px-3 py-1.5 rounded-full border border-black/5">
+              <Palette size={12} /> 选中 Logo 后点击色块可改为纯色
             </div>
           </div>
         </div>
