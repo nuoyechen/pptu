@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Konva from 'konva';
-import { Stage, Layer, Image as KonvaImage, Transformer, Line } from 'react-konva';
+import { Stage, Layer, Image as KonvaImage, Transformer, Rect } from 'react-konva';
 import useImage from 'use-image';
-import { Download, Move, Maximize, RotateCcw, Trash2, ArrowLeft, Brush, Minus, Plus, RefreshCw, Check, SunMoon } from 'lucide-react';
+import { Download, Move, Maximize, ArrowLeft, MousePointer2, RefreshCw, Check, SunMoon, Trash2 } from 'lucide-react';
 
 interface LogoData {
   id: string;
@@ -135,11 +135,10 @@ export default function Editor({ productImage, logos, onBack }: EditorProps) {
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [productDisplaySize, setProductDisplaySize] = useState({ width: 0, height: 0, x: 0, y: 0 });
   const [isExporting, setIsExporting] = useState(false);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [lines, setLines] = useState<any[]>([]);
-  const [brushSize, setBrushSize] = useState(20);
-  const isDrawingRef = useRef(false);
-  const [cursorPos, setCursorPos] = useState({ x: 0, y: 0 });
+  const [isSelecting, setIsSelecting] = useState(false);
+  const [rectangles, setRectangles] = useState<{ x: number; y: number; width: number; height: number }[]>([]);
+  const [currentRect, setCurrentRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const [currentProductImage, setCurrentProductImage] = useState(productImage);
   
   // Re-fetch image when internal state changes (e.g. after inpainting)
@@ -301,106 +300,100 @@ export default function Editor({ productImage, logos, onBack }: EditorProps) {
   };
 
   const handleInpaint = async () => {
-    if (!displayImg || lines.length === 0) return;
+    const rectsToUse = currentRect ? [...rectangles, currentRect] : rectangles;
+    if (rectsToUse.length === 0) {
+      alert("请先用选区工具框选需要去除的区域。");
+      return;
+    }
+    const imgToUse = displayImg || productImg;
+    if (!imgToUse) {
+      alert("图片尚未加载完成，请稍候再试。");
+      return;
+    }
+    if (productDisplaySize.width <= 0 || productDisplaySize.height <= 0) {
+      alert("画布尺寸异常，请刷新页面后重试。");
+      return;
+    }
 
     setIsProcessing(true);
     
-    // Check for Baidu Cloud AK/SK
     const apiKey = import.meta.env.VITE_BAIDU_AK;
     const secretKey = import.meta.env.VITE_BAIDU_SK;
+    const scale = imgToUse.width / productDisplaySize.width;
     
     try {
-      // 1. Prepare Image & Mask Canvases
       const canvas = document.createElement('canvas');
-      canvas.width = displayImg.width;
-      canvas.height = displayImg.height;
+      canvas.width = imgToUse.width;
+      canvas.height = imgToUse.height;
       const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      ctx.drawImage(displayImg, 0, 0);
+      if (!ctx) {
+        setIsProcessing(false);
+        return;
+      }
+      ctx.drawImage(imgToUse, 0, 0);
 
       const maskCanvas = document.createElement('canvas');
-      maskCanvas.width = displayImg.width;
-      maskCanvas.height = displayImg.height;
+      maskCanvas.width = imgToUse.width;
+      maskCanvas.height = imgToUse.height;
       const maskCtx = maskCanvas.getContext('2d');
-      if (!maskCtx) return;
+      if (!maskCtx) {
+        setIsProcessing(false);
+        return;
+      }
 
-      // Scale factor
-      const scale = displayImg.width / productDisplaySize.width;
-
-      // Draw mask (Black background, White stroke for AI)
+      // Black background, white rectangles for inpainting area
       maskCtx.fillStyle = 'black';
       maskCtx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
-      
-      maskCtx.lineCap = 'round';
-      maskCtx.lineJoin = 'round';
-      maskCtx.strokeStyle = 'white'; // White for inpainting area
-
-      lines.forEach(line => {
-        maskCtx.lineWidth = line.strokeWidth * scale;
-        maskCtx.beginPath();
-        line.points.forEach((val: number, i: number) => {
-          const x = (val - productDisplaySize.x) * scale;
-          const y = i % 2 === 1 ? (val - productDisplaySize.y) * scale : 0;
-          
-          if (i === 0) {
-             maskCtx.moveTo((line.points[0] - productDisplaySize.x) * scale, (line.points[1] - productDisplaySize.y) * scale);
-          } else if (i % 2 === 0) {
-             maskCtx.lineTo((line.points[i] - productDisplaySize.x) * scale, (line.points[i+1] - productDisplaySize.y) * scale);
-          }
-        });
-        maskCtx.stroke();
+      maskCtx.fillStyle = 'white';
+      rectsToUse.forEach(r => {
+        const x = Math.round((r.x - productDisplaySize.x) * scale);
+        const y = Math.round((r.y - productDisplaySize.y) * scale);
+        const w = Math.max(1, Math.round(r.width * scale));
+        const h = Math.max(1, Math.round(r.height * scale));
+        maskCtx.fillRect(x, y, w, h);
       });
 
-      // 2. Call Baidu Cloud API if key exists
       if (apiKey && secretKey) {
-        // Step 1: Get Access Token
-        // Use local proxy to avoid CORS
         const tokenRes = await fetch(`/baidu-api/oauth/2.0/token?grant_type=client_credentials&client_id=${apiKey}&client_secret=${secretKey}`, {
           method: 'POST'
         });
         
         if (!tokenRes.ok) throw new Error("Failed to get Baidu Access Token");
         const tokenData = await tokenRes.json();
+        if (tokenData.error) {
+          throw new Error(tokenData.error_description || tokenData.error || "Token 获取失败");
+        }
         const accessToken = tokenData.access_token;
+        if (!accessToken) throw new Error("未返回 access_token");
 
-        // Step 2: Call Image Inpainting API
         const imageBase64 = canvas.toDataURL('image/png').split(',')[1];
-        
-        let minX = width, minY = height, maxX = 0, maxY = 0;
-        lines.forEach(line => {
-          line.points.forEach((val: number, i: number) => {
-             const v = (i % 2 === 0 ? val - productDisplaySize.x : val - productDisplaySize.y) * scale;
-             if (i % 2 === 0) {
-               if (v < minX) minX = v;
-               if (v > maxX) maxX = v;
-             } else {
-               if (v < minY) minY = v;
-               if (v > maxY) maxY = v;
-             }
-          });
-        });
-        
-        // Add padding
-        const pad = 10;
-        minX = Math.max(0, Math.floor(minX - pad));
-        minY = Math.max(0, Math.floor(minY - pad));
-        maxX = Math.min(width, Math.ceil(maxX + pad));
-        maxY = Math.min(height, Math.ceil(maxY + pad));
-        
+        const imgWidth = imgToUse.width;
+        const imgHeight = imgToUse.height;
+
+        // Use first rectangle for API (or merge all into bounding box)
+        const firstRect = rectsToUse[0];
+        const rectX = Math.round((firstRect.x - productDisplaySize.x) * scale);
+        const rectY = Math.round((firstRect.y - productDisplaySize.y) * scale);
+        const rectW = Math.max(1, Math.round(firstRect.width * scale));
+        const rectH = Math.max(1, Math.round(firstRect.height * scale));
+
         const rect = {
-          "left": minX,
-          "top": minY,
-          "width": maxX - minX,
-          "height": maxY - minY
+          "left": Math.max(0, rectX),
+          "top": Math.max(0, rectY),
+          "width": Math.min(imgWidth - rectX, rectW),
+          "height": Math.min(imgHeight - rectY, rectH)
         };
 
         const response = await fetch(`/baidu-api/rest/2.0/image-process/v1/inpainting?access_token=${accessToken}`, {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
+            'Content-Type': 'application/json; charset=UTF-8',
             'Accept': 'application/json'
           },
-          body: `image=${encodeURIComponent(imageBase64)}&rectangle=[${JSON.stringify(rect)}]`
+          body: JSON.stringify({
+            image: imageBase64,
+            rectangle: [rect]
+          })
         });
 
         if (!response.ok) {
@@ -409,16 +402,16 @@ export default function Editor({ productImage, logos, onBack }: EditorProps) {
         
         const result = await response.json();
         if (result.error_code) {
-          throw new Error(`Baidu API Error: ${result.error_msg}`);
+          throw new Error(result.error_msg || `错误码: ${result.error_code}`);
+        }
+        if (!result.image) {
+          throw new Error("API 未返回修复后的图片");
         }
 
         const newUrl = `data:image/jpeg;base64,${result.image}`;
         setCurrentProductImage(newUrl);
       } else {
-        // 3. Fallback to Local Algorithm (Simple Blur)
-        console.warn("No API Key found. Using local fallback.");
-        alert("未检测到 API Key，正在使用本地简易算法。效果可能有限。\n请在 .env 文件中配置 VITE_BAIDU_AK 和 VITE_BAIDU_SK 以获得更好的修复效果。");
-
+        // Local fallback: fill with surrounding content
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const maskData = maskCtx.getImageData(0, 0, canvas.width, canvas.height);
         const data = imageData.data;
@@ -426,14 +419,12 @@ export default function Editor({ productImage, logos, onBack }: EditorProps) {
         const width = canvas.width;
         const height = canvas.height;
 
-        // Use Red channel of mask (White=255)
         const isHole = new Uint8Array(width * height);
         for (let i = 0; i < mData.length; i += 4) {
           if (mData[i] > 100) isHole[i / 4] = 1;
         }
 
-        // Simple diffusion
-        const maxPasses = 20;
+        const maxPasses = 30;
         let changes = true;
         for (let pass = 0; pass < maxPasses && changes; pass++) {
           changes = false;
@@ -472,20 +463,22 @@ export default function Editor({ productImage, logos, onBack }: EditorProps) {
         setCurrentProductImage(newUrl);
       }
 
-      setLines([]);
-      setIsDrawing(false);
+      setRectangles([]);
+      setCurrentRect(null);
+      setIsSelecting(false);
     } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
       console.error("Inpainting failed", e);
-      alert("处理失败，请检查网络或 API Key 配置。");
+      alert("处理失败：" + msg + "\n请检查网络或 API Key 配置。");
     } finally {
       setIsProcessing(false);
     }
   };
 
   const handleExport = () => {
-    setSelectedId(null); // Deselect before export
+    setSelectedId(null);
     setIsExporting(true);
-    setIsDrawing(false); // Stop drawing mode
+    setIsSelecting(false);
     setTimeout(() => {
       try {
         const scale = productImg ? productImg.width / productDisplaySize.width : 1;
@@ -537,7 +530,7 @@ export default function Editor({ productImage, logos, onBack }: EditorProps) {
   return (
     <div className="flex flex-col h-screen bg-[#F5F5F0]">
       {/* Header */}
-      <header className="flex items-center justify-between px-8 py-4 bg-white border-b border-[#141414]/10">
+      <header className="relative z-20 flex items-center justify-between px-8 py-4 bg-white border-b border-[#141414]/10">
         <div className="flex items-center gap-4">
           <button 
             onClick={onBack}
@@ -550,48 +543,40 @@ export default function Editor({ productImage, logos, onBack }: EditorProps) {
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 mr-4 bg-white/50 p-1.5 rounded-full backdrop-blur-sm border border-black/5">
             <button
-              onClick={() => setIsDrawing(!isDrawing)}
+              type="button"
+              onClick={() => setIsSelecting(!isSelecting)}
               className={`p-2 rounded-full transition-all ${
-                isDrawing 
-                  ? 'bg-red-50 text-red-600 shadow-sm' 
+                isSelecting 
+                  ? 'bg-blue-50 text-blue-600 shadow-sm' 
                   : 'text-black/60 hover:bg-black/5'
               }`}
-              title="涂抹去除 Logo"
+              title="框选去除区域"
             >
-              <Brush size={20} />
+              <MousePointer2 size={20} />
             </button>
             
-            {isDrawing && (
-              <div className="flex items-center gap-2 px-2 border-l border-black/10">
-                <button 
-                  onClick={() => setBrushSize(Math.max(5, brushSize - 5))}
-                  className="p-1 hover:bg-black/5 rounded-full text-black/60"
-                >
-                  <Minus size={14} />
-                </button>
-                <span className="text-xs font-mono w-6 text-center">{brushSize}</span>
-                <button 
-                  onClick={() => setBrushSize(Math.min(50, brushSize + 5))}
-                  className="p-1 hover:bg-black/5 rounded-full text-black/60"
-                >
-                  <Plus size={14} />
-                </button>
-              </div>
-            )}
-            
-            {lines.length > 0 && (
+            {(rectangles.length > 0 || currentRect) && (
               <React.Fragment>
                 <button
-                  onClick={handleInpaint}
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleInpaint();
+                  }}
                   className="p-2 text-green-600 bg-green-50 hover:bg-green-100 rounded-full transition-all ml-2"
-                  title="应用去除 (Auto Fix)"
+                  title="应用去除 (填充背景)"
                 >
                   <Check size={20} />
                 </button>
                 <button
-                  onClick={() => setLines([])}
+                  type="button"
+                  onClick={() => {
+                    setRectangles([]);
+                    setCurrentRect(null);
+                  }}
                   className="p-2 text-black/60 hover:bg-black/5 rounded-full transition-all"
-                  title="撤销所有涂抹"
+                  title="清除选区"
                 >
                   <RefreshCw size={20} />
                 </button>
@@ -648,39 +633,46 @@ export default function Editor({ productImage, logos, onBack }: EditorProps) {
               if (clickedOnEmpty) {
                 setSelectedId(null);
               }
-              if (isDrawing) {
-                isDrawingRef.current = true;
+              if (isSelecting) {
                 const pos = e.target.getStage().getPointerPosition();
-                setLines([...lines, { points: [pos.x, pos.y], strokeWidth: brushSize }]);
+                dragStartRef.current = { x: pos.x, y: pos.y };
+                setCurrentRect({ x: pos.x, y: pos.y, width: 0, height: 0 });
               }
             }}
             onMouseMove={(e) => {
-              if (isDrawing) {
+              if (isSelecting && dragStartRef.current) {
                 const stage = e.target.getStage();
-                const point = stage.getPointerPosition();
-                setCursorPos(point);
-
-                if (isDrawingRef.current) {
-                  let lastLine = lines[lines.length - 1];
-                  lastLine.points = lastLine.points.concat([point.x, point.y]);
-                  lines.splice(lines.length - 1, 1, lastLine);
-                  setLines(lines.concat());
-                }
+                const pos = stage.getPointerPosition();
+                const start = dragStartRef.current;
+                const x = Math.min(start.x, pos.x);
+                const y = Math.min(start.y, pos.y);
+                const width = Math.abs(pos.x - start.x);
+                const height = Math.abs(pos.y - start.y);
+                setCurrentRect({ x, y, width, height });
               }
             }}
-            onMouseLeave={() => {
-              // Hide custom cursor when leaving stage
-              setCursorPos({ x: -1000, y: -1000 });
+            onMouseUp={(e) => {
+              if (isSelecting && dragStartRef.current) {
+                const stage = e.target.getStage();
+                const pos = stage.getPointerPosition();
+                const start = dragStartRef.current;
+                const x = Math.min(start.x, pos.x);
+                const y = Math.min(start.y, pos.y);
+                const width = Math.abs(pos.x - start.x);
+                const height = Math.abs(pos.y - start.y);
+                if (width > 5 && height > 5) {
+                  setRectangles(prev => [...prev, { x, y, width, height }]);
+                }
+                setCurrentRect(null);
+                dragStartRef.current = null;
+              }
             }}
-            onMouseUp={() => {
-              isDrawingRef.current = false;
-            }}
-            style={{ cursor: isDrawing ? 'none' : 'default' }}
+            style={{ cursor: isSelecting ? 'crosshair' : 'default' }}
           >
             <Layer>
-              {productImg && (
+              {(displayImg || productImg) && (
                 <KonvaImage
-                  image={productImg}
+                  image={displayImg || productImg}
                   x={productDisplaySize.x}
                   y={productDisplaySize.y}
                   width={productDisplaySize.width}
@@ -688,18 +680,33 @@ export default function Editor({ productImage, logos, onBack }: EditorProps) {
                   listening={false}
                 />
               )}
-              {lines.map((line, i) => (
-                <Line
+              {rectangles.map((r, i) => (
+                <Rect
                   key={i}
-                  points={line.points}
-                  stroke="rgba(255, 0, 0, 0.6)"
-                  strokeWidth={line.strokeWidth}
-                  tension={0.5}
-                  lineCap="round"
-                  lineJoin="round"
+                  x={r.x}
+                  y={r.y}
+                  width={r.width}
+                  height={r.height}
+                  stroke="rgba(59, 130, 246, 0.8)"
+                  strokeWidth={2}
+                  dash={[6, 4]}
+                  fill="rgba(59, 130, 246, 0.15)"
                   listening={false}
                 />
               ))}
+              {currentRect && currentRect.width > 0 && currentRect.height > 0 && (
+                <Rect
+                  x={currentRect.x}
+                  y={currentRect.y}
+                  width={currentRect.width}
+                  height={currentRect.height}
+                  stroke="rgba(59, 130, 246, 0.9)"
+                  strokeWidth={2}
+                  dash={[6, 4]}
+                  fill="rgba(59, 130, 246, 0.2)"
+                  listening={false}
+                />
+              )}
               {logoItems.map((logo) => (
                 <LogoItem
                   key={logo.id}
@@ -716,32 +723,18 @@ export default function Editor({ productImage, logos, onBack }: EditorProps) {
                 />
               ))}
             </Layer>
-            {isDrawing && (
-              <Layer>
-                <Line
-                  points={[cursorPos.x, cursorPos.y]}
-                  stroke="black"
-                  strokeWidth={1}
-                  dash={[4, 4]}
-                  listening={false}
-                  // Circle outline for brush
-                  sceneFunc={(ctx, shape) => {
-                    ctx.beginPath();
-                    ctx.arc(cursorPos.x, cursorPos.y, brushSize / 2, 0, Math.PI * 2, false);
-                    ctx.strokeShape(shape);
-                  }}
-                />
-              </Layer>
-            )}
           </Stage>
 
           {/* Instructions Overlay */}
           <div className="absolute bottom-6 left-6 pointer-events-none flex flex-col gap-2">
             <div className="flex items-center gap-2 text-xs font-mono text-black/40 bg-white/80 backdrop-blur-sm px-3 py-1.5 rounded-full border border-black/5">
-              <Move size={12} /> 拖动调整位置
+              <MousePointer2 size={12} /> 点击选区工具，在图片上拖拽框选需去除的区域
             </div>
             <div className="flex items-center gap-2 text-xs font-mono text-black/40 bg-white/80 backdrop-blur-sm px-3 py-1.5 rounded-full border border-black/5">
-              <Maximize size={12} /> 使用手柄缩放大小
+              <Move size={12} /> 拖动调整 Logo 位置
+            </div>
+            <div className="flex items-center gap-2 text-xs font-mono text-black/40 bg-white/80 backdrop-blur-sm px-3 py-1.5 rounded-full border border-black/5">
+              <Maximize size={12} /> 使用手柄缩放 Logo 大小
             </div>
           </div>
         </div>
