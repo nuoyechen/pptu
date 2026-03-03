@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import Konva from 'konva';
 import { Stage, Layer, Image as KonvaImage, Transformer, Rect } from 'react-konva';
 import useImage from 'use-image';
-import { Download, Move, Maximize, ArrowLeft, MousePointer2, RefreshCw, Check, SunMoon, Trash2, Palette } from 'lucide-react';
+import { Download, ArrowLeft, MousePointer2, RefreshCw, Check, SunMoon, Trash2, Palette } from 'lucide-react';
 
 // 纯色预设，用于将抠出的 Logo 改为指定颜色
 const PRESET_COLORS = [
@@ -809,22 +809,6 @@ export default function Editor({ productImage, logos, onBack }: EditorProps) {
               ))}
             </Layer>
           </Stage>
-
-          {/* Instructions Overlay */}
-          <div className="absolute bottom-6 left-6 pointer-events-none flex flex-col gap-2">
-            <div className="flex items-center gap-2 text-xs font-mono text-black/40 bg-white/80 backdrop-blur-sm px-3 py-1.5 rounded-full border border-black/5">
-              <MousePointer2 size={12} /> 点击选区工具，在图片上拖拽框选需去除的区域
-            </div>
-            <div className="flex items-center gap-2 text-xs font-mono text-black/40 bg-white/80 backdrop-blur-sm px-3 py-1.5 rounded-full border border-black/5">
-              <Move size={12} /> 拖动调整 Logo 位置
-            </div>
-            <div className="flex items-center gap-2 text-xs font-mono text-black/40 bg-white/80 backdrop-blur-sm px-3 py-1.5 rounded-full border border-black/5">
-              <Maximize size={12} /> 使用手柄缩放 Logo 大小
-            </div>
-            <div className="flex items-center gap-2 text-xs font-mono text-black/40 bg-white/80 backdrop-blur-sm px-3 py-1.5 rounded-full border border-black/5">
-              <Palette size={12} /> 选中 Logo 后点击色块可改为纯色
-            </div>
-          </div>
         </div>
       </main>
     </div>
