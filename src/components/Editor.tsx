@@ -638,13 +638,14 @@ export default function Editor({ productImage, logos, onBack }: EditorProps) {
                 {PRESET_COLORS.map(({ name, value }) => {
                   const logo = logoItems.find(l => l.id === selectedId);
                   const isActive = logo?.logoColor === value;
+                  const isWhite = value === '#ffffff';
                   return (
                     <button
                       key={value}
                       type="button"
                       onClick={() => handleLogoColor(isActive ? undefined : value)}
                       className={`w-6 h-6 rounded-full border-2 transition-all ${
-                        isActive ? 'border-black scale-110 ring-2 ring-black/20' : 'border-transparent hover:scale-110'
+                        isActive ? 'border-black scale-110 ring-2 ring-black/20' : isWhite ? 'border-gray-300 hover:scale-110' : 'border-transparent hover:scale-110'
                       }`}
                       style={{ backgroundColor: value }}
                       title={name}
