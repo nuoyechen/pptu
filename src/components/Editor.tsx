@@ -374,12 +374,23 @@ export default function Editor({ productImage, logos, onBack }: EditorProps) {
       const useServerApi = import.meta.env.PROD;
 
       if (useServerApi) {
-        const response = await fetch('/api/baidu-inpaint', {
+        const apiUrl = `${window.location.origin}/api/baidu-inpaint`;
+        const response = await fetch(apiUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ image: imageBase64, rectangle: [rect] })
         });
-        const result = await response.json();
+        const text = await response.text();
+        let result: { error_code?: string; error_msg?: string; image?: string };
+        try {
+          result = JSON.parse(text);
+        } catch {
+          throw new Error(
+            response.ok
+              ? 'API 返回格式异常，请稍后重试'
+              : `请求失败 (${response.status})：请确认已在 Vercel 配置 VITE_BAIDU_AK 和 VITE_BAIDU_SK 环境变量`
+          );
+        }
         if (!response.ok || result.error_code) {
           throw new Error(result.error_msg || '图像修复请求失败');
         }
