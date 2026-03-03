@@ -353,63 +353,58 @@ export default function Editor({ productImage, logos, onBack }: EditorProps) {
         maskCtx.fillRect(x, y, w, h);
       });
 
-      if (apiKey && secretKey) {
+      const imageBase64 = canvas.toDataURL('image/png').split(',')[1];
+      const imgWidth = imgToUse.width;
+      const imgHeight = imgToUse.height;
+
+      const firstRect = rectsToUse[0];
+      const rectX = Math.round((firstRect.x - productDisplaySize.x) * scale);
+      const rectY = Math.round((firstRect.y - productDisplaySize.y) * scale);
+      const rectW = Math.max(1, Math.round(firstRect.width * scale));
+      const rectH = Math.max(1, Math.round(firstRect.height * scale));
+
+      const rect = {
+        left: Math.max(0, rectX),
+        top: Math.max(0, rectY),
+        width: Math.min(imgWidth - rectX, rectW),
+        height: Math.min(imgHeight - rectY, rectH)
+      };
+
+      // 生产环境（Vercel）使用服务端 API 路由，避免代理不可用
+      const useServerApi = import.meta.env.PROD;
+
+      if (useServerApi) {
+        const response = await fetch('/api/baidu-inpaint', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: imageBase64, rectangle: [rect] })
+        });
+        const result = await response.json();
+        if (!response.ok || result.error_code) {
+          throw new Error(result.error_msg || '图像修复请求失败');
+        }
+        if (!result.image) throw new Error("API 未返回修复后的图片");
+        setCurrentProductImage(`data:image/jpeg;base64,${result.image}`);
+      } else if (apiKey && secretKey) {
         const tokenRes = await fetch(`/baidu-api/oauth/2.0/token?grant_type=client_credentials&client_id=${apiKey}&client_secret=${secretKey}`, {
           method: 'POST'
         });
-        
         if (!tokenRes.ok) throw new Error("Failed to get Baidu Access Token");
         const tokenData = await tokenRes.json();
-        if (tokenData.error) {
-          throw new Error(tokenData.error_description || tokenData.error || "Token 获取失败");
-        }
+        if (tokenData.error) throw new Error(tokenData.error_description || tokenData.error || "Token 获取失败");
         const accessToken = tokenData.access_token;
         if (!accessToken) throw new Error("未返回 access_token");
 
-        const imageBase64 = canvas.toDataURL('image/png').split(',')[1];
-        const imgWidth = imgToUse.width;
-        const imgHeight = imgToUse.height;
-
-        // Use first rectangle for API (or merge all into bounding box)
-        const firstRect = rectsToUse[0];
-        const rectX = Math.round((firstRect.x - productDisplaySize.x) * scale);
-        const rectY = Math.round((firstRect.y - productDisplaySize.y) * scale);
-        const rectW = Math.max(1, Math.round(firstRect.width * scale));
-        const rectH = Math.max(1, Math.round(firstRect.height * scale));
-
-        const rect = {
-          "left": Math.max(0, rectX),
-          "top": Math.max(0, rectY),
-          "width": Math.min(imgWidth - rectX, rectW),
-          "height": Math.min(imgHeight - rectY, rectH)
-        };
-
         const response = await fetch(`/baidu-api/rest/2.0/image-process/v1/inpainting?access_token=${accessToken}`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json; charset=UTF-8',
-            'Accept': 'application/json'
-          },
-          body: JSON.stringify({
-            image: imageBase64,
-            rectangle: [rect]
-          })
+          headers: { 'Content-Type': 'application/json; charset=UTF-8', 'Accept': 'application/json' },
+          body: JSON.stringify({ image: imageBase64, rectangle: [rect] })
         });
-
-        if (!response.ok) {
-           throw new Error(`Baidu API Error: ${response.statusText}`);
-        }
-        
+        if (!response.ok) throw new Error(`Baidu API Error: ${response.statusText}`);
         const result = await response.json();
-        if (result.error_code) {
-          throw new Error(result.error_msg || `错误码: ${result.error_code}`);
-        }
-        if (!result.image) {
-          throw new Error("API 未返回修复后的图片");
-        }
-
-        const newUrl = `data:image/jpeg;base64,${result.image}`;
-        setCurrentProductImage(newUrl);
+        if (result.error_code) throw new Error(result.error_msg || `错误码: ${result.error_code}`);
+        if (!result.image) throw new Error("API 未返回修复后的图片");
+        setCurrentProductImage(`data:image/jpeg;base64,${result.image}`);
       } else {
         // Local fallback: fill with surrounding content
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
